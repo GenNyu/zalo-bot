@@ -321,18 +321,31 @@ def _env(monkeypatch):
         monkeypatch.setenv(k, v)
 ```
 
-- [ ] **Step 4: Install deps**
+- [ ] **Step 4: Write `.gitignore`**
 
-Run:
-```bash
-python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
+```gitignore
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 ```
-Expected: install succeeds.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Install deps**
+
+The venv already exists at `.venv` (created with `/opt/homebrew/bin/python3.11`, Python 3.11.15). The system default `python3` is 3.9, which is too old for this project — always use the venv.
+```bash
+. .venv/bin/activate && python --version   # expect 3.11.x
+pip install -e ".[dev]"
+```
+Expected: Python 3.11.x and install succeeds. Run all later `pytest`/`ruff`/`mypy` commands inside this activated venv.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml .env.example src/zalo_bot/__init__.py tests/__init__.py tests/conftest.py
+git add pyproject.toml .env.example .gitignore src/zalo_bot/__init__.py tests/__init__.py tests/conftest.py
 git commit -m "chore: scaffold project, deps, and tooling"
 ```
 
