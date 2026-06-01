@@ -1,6 +1,6 @@
 from functools import lru_cache
-from typing import Any
 
+from opensearchpy import AsyncOpenSearch
 from redis.asyncio import Redis
 
 from zalo_bot.config.settings import get_settings
@@ -28,11 +28,9 @@ def build_gateway() -> LlmGateway:
 
 @lru_cache
 def build_retriever() -> OpenSearchRetriever:
-    from opensearchpy._async.client import AsyncOpenSearch
-
     s = get_settings()
     http_auth = (s.opensearch_user, s.opensearch_password) if s.opensearch_user else None
-    client: Any = AsyncOpenSearch(
+    client = AsyncOpenSearch(
         hosts=[s.opensearch_url], http_auth=http_auth,
         timeout=s.external_call_timeout_seconds,
     )
