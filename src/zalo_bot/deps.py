@@ -23,6 +23,8 @@ def build_gateway() -> LlmGateway:
         base_url=s.llm_gateway_base_url, api_key=s.llm_gateway_api_key,
         embedding_model=s.llm_embedding_model, chat_model=s.llm_chat_model,
         timeout=s.external_call_timeout_seconds,
+        chat_base_url=s.llm_chat_base_url or None,
+        chat_api_key=s.llm_chat_api_key or None,
     )
 
 

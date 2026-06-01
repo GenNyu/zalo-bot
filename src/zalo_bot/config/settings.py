@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_gateway_api_key: str
     llm_embedding_model: str
     llm_chat_model: str
+    # Optional: separate endpoint/key for chat when the provider issues
+    # per-model keys (e.g. URbox). Fall back to llm_gateway_* if unset.
+    llm_chat_base_url: str = ""
+    llm_chat_api_key: str = ""
 
     rag_max_context_chars: int = 6000
     external_call_timeout_seconds: int = 30

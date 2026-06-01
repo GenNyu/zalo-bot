@@ -14,5 +14,7 @@ def test_settings_load_from_env():
 
 def test_missing_required_field_raises(monkeypatch):
     monkeypatch.delenv("ZALO_OA_SECRET", raising=False)
+    # _env_file=None disables .env discovery so the test doesn't depend on
+    # whether a developer happens to have a populated .env at the repo root.
     with pytest.raises(ValidationError):
-        Settings()
+        Settings(_env_file=None)  # type: ignore[call-arg]
