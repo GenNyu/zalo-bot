@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -6,7 +6,8 @@ from typing import Any
 class SearchHit:
     id: str
     score: float
-    source: dict[str, Any]
+    text: str
+    source: dict[str, Any] = field(default_factory=dict)
 
 
 def build_hybrid_query(
@@ -52,5 +53,13 @@ class OpenSearchRetriever:
             score = float(h.get("_score") or 0.0)
             if score < self._min_score:
                 continue
-            hits.append(SearchHit(id=h["_id"], score=score, source=h.get("_source", {})))
+            src = h.get("_source", {})
+            hits.append(
+                SearchHit(
+                    id=h["_id"],
+                    score=score,
+                    text=str(src.get(self._text_field, "")),
+                    source=src,
+                )
+            )
         return hits

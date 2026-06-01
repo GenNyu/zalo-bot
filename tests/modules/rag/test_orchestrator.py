@@ -30,7 +30,7 @@ class _Retriever:
 async def test_answer_returns_llm_output_when_hits_exist():
     gw = _Gateway("đáp án từ context")
     rag = RagOrchestrator(
-        gateway=gw, retriever=_Retriever([SearchHit("a", 0.9, {"text": "ctx"})]),
+        gateway=gw, retriever=_Retriever([SearchHit("a", 0.9, "ctx")]),
         top_k=5, max_context_chars=1000,
     )
     out = await rag.answer_question("hỏi gì")

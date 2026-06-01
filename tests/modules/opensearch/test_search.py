@@ -39,5 +39,20 @@ async def test_hybrid_search_maps_hits_and_filters_min_score():
     )
     hits = await retriever.hybrid_search("q", [0.1], top_k=5)
     assert [h.id for h in hits] == ["a"]  # b filtered out by min_score
+    assert hits[0].text == "A"
     assert fake.last_call["index"] == "open_webui_file-*"
     assert fake.last_call["params"] == {"search_pipeline": "hp"}
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_reads_configured_text_field():
+    # Regression: prompt builder must still get text when the field is not "text".
+    fake = _FakeClient(
+        [{"_id": "a", "_score": 0.9, "_source": {"content": "hello", "metadata": {}}}]
+    )
+    retriever = OpenSearchRetriever(
+        client=fake, index_pattern="open_webui_file-*", search_pipeline="hp",
+        text_field="content", vector_field="vector", min_score=0.0,
+    )
+    hits = await retriever.hybrid_search("q", [0.1], top_k=5)
+    assert hits[0].text == "hello"

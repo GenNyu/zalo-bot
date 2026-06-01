@@ -13,7 +13,7 @@ def build_messages(question: str, hits: list[SearchHit], *, max_context_chars: i
     blocks: list[str] = []
     used = 0
     for i, hit in enumerate(hits, start=1):
-        text = str(hit.source.get("text", "")).strip()
+        text = hit.text.strip()
         if not text:
             continue
         block = f"[{i}] {text}"

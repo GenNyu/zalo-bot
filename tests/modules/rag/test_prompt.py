@@ -3,7 +3,7 @@ from zalo_bot.modules.rag.prompt import FALLBACK_ANSWER, build_messages
 
 
 def _hit(text):
-    return SearchHit(id="x", score=1.0, source={"text": text})
+    return SearchHit(id="x", score=1.0, text=text)
 
 
 def test_build_messages_includes_context_and_question():
