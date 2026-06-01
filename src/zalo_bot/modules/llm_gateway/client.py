@@ -1,4 +1,7 @@
+from typing import cast
+
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 
 class LlmGateway:
@@ -18,6 +21,8 @@ class LlmGateway:
 
     async def chat(self, messages: list[dict], *, temperature: float = 0.2) -> str:
         resp = await self._client.chat.completions.create(
-            model=self._chat_model, messages=messages, temperature=temperature
+            model=self._chat_model,
+            messages=cast("list[ChatCompletionMessageParam]", messages),
+            temperature=temperature,
         )
         return (resp.choices[0].message.content or "").strip()

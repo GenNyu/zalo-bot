@@ -1,3 +1,4 @@
+import os
 import pytest
 
 # Provide deterministic env so config.Settings loads in unit tests.
@@ -16,6 +17,12 @@ _TEST_ENV = {
     "LLM_EMBEDDING_MODEL": "embed-model",
     "LLM_CHAT_MODEL": "chat-model",
 }
+
+
+def pytest_configure(config):
+    """Set environment variables before any imports."""
+    for k, v in _TEST_ENV.items():
+        os.environ[k] = v
 
 
 @pytest.fixture(autouse=True)
