@@ -8,6 +8,6 @@ def verify_signature(
     if not header or not header.startswith("mac="):
         return False
     provided = header[len("mac=") :]
-    payload = (app_id + raw_body.decode("utf-8") + timestamp + oa_secret).encode("utf-8")
+    payload = app_id.encode("utf-8") + raw_body + timestamp.encode("utf-8") + oa_secret.encode("utf-8")
     expected = hashlib.sha256(payload).hexdigest()
     return hmac.compare_digest(provided, expected)

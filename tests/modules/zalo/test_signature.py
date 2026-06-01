@@ -4,7 +4,7 @@ from zalo_bot.modules.zalo.signature import verify_signature
 
 
 def _mac(app_id, body, ts, secret):
-    return hashlib.sha256((app_id + body.decode() + ts + secret).encode()).hexdigest()
+    return hashlib.sha256(app_id.encode() + body + ts.encode() + secret.encode()).hexdigest()
 
 
 def test_valid_signature_passes():
@@ -31,4 +31,11 @@ def test_missing_or_malformed_header_fails():
     )
     assert not verify_signature(
         raw_body=b"{}", header="garbage", app_id="a", timestamp="1", oa_secret="s"
+    )
+
+
+def test_non_utf8_body_returns_false_not_raises():
+    assert not verify_signature(
+        raw_body=b"\xff\xfe\x00", header="mac=00",
+        app_id="a", timestamp="1", oa_secret="s",
     )
