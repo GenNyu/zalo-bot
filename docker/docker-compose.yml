@@ -1,15 +1,23 @@
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports: ["6379:6379"]
 
   opensearch:
-    image: opensearchproject/opensearch:2.13.0
+    image: opensearchproject/opensearch:2
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: Dev_passw0rd!
     ports: ["9200:9200"]
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports: ["5601:5601"]
+    depends_on: [opensearch]
 
   web:
     build:
@@ -20,6 +28,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       OPENSEARCH_URL: http://opensearch:9200
     ports: ["3000:3000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]  # Linux compat for LLM gateway on host
     depends_on: [redis, opensearch]
 
   worker:
@@ -31,4 +40,50 @@ services:
       REDIS_URL: redis://redis:6379/0
       OPENSEARCH_URL: http://opensearch:9200
     command: ["arq", "zalo_bot.entrypoints.worker.WorkerSettings"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [redis, opensearch]
+
+  # Ingestion UI: upload .md/.pdf/.docx → chunk + embed → write to OpenSearch
+  # under index pattern `open_webui_file-*` which zalo-bot reads.
+  # CRITICAL: must share the same LLM gateway + embedding model as zalo-bot,
+  # otherwise indexed vectors won't be in the same space as query vectors.
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports: ["8080:8080"]
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      # --- Vector backend ---
+      VECTOR_DB: opensearch
+      OPENSEARCH_URI: http://opensearch:9200
+      OPENSEARCH_SSL: "false"
+      OPENSEARCH_CERT_VERIFY: "false"
+      # Open WebUI's OpenSearch client unconditionally calls
+      # http_auth=(USERNAME, PASSWORD); leaving them unset -> TypeError on join.
+      # Cluster has plugins.security.disabled=true so creds are ignored anyway.
+      OPENSEARCH_USERNAME: admin
+      OPENSEARCH_PASSWORD: Dev_passw0rd!
+      # --- Embeddings via the same OpenAI-compatible gateway as zalo-bot ---
+      # These reference .env at the repo root; run compose with:
+      #   docker compose --env-file .env -f docker/docker-compose.yml up
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: ${LLM_GATEWAY_BASE_URL}
+      RAG_OPENAI_API_KEY: ${LLM_GATEWAY_API_KEY}
+      RAG_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL}
+      # --- Chat (so Open WebUI UI itself can query through the same gateway) ---
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: ${AI_GATEWAY_URL}
+      OPENAI_API_KEY: ${AI_GATEWAY_API_KEY}
+      # Some Open WebUI versions read the plural forms instead — set both.
+      OPENAI_API_BASE_URLS: ${AI_GATEWAY_URL}
+      OPENAI_API_KEYS: ${AI_GATEWAY_API_KEY}
+      # --- Disable Ollama probe (no Ollama in stack -> kills the noisy probe) ---
+      ENABLE_OLLAMA_API: "false"
+      # --- Auth ---
+      WEBUI_AUTH: "true"
+      ENABLE_SIGNUP: "true"  # first user becomes admin; turn off after setup
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [opensearch]
+
+volumes:
+  open-webui-data:
