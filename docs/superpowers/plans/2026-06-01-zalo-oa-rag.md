@@ -51,7 +51,7 @@ zalo-bot/
 │   │   └── jobs.py                     # AnswerJob, enqueue_answer_job, process_answer_job
 │   └── entrypoints/
 │       ├── __init__.py
-│       ├── web.py                      # FastAPI app: /webhook, /health
+│       ├── web.py                      # FastAPI app: /webhook/zalo, /health
 │       └── worker.py                   # arq WorkerSettings
 └── tests/
     ├── __init__.py
@@ -67,42 +67,128 @@ zalo-bot/
 
 ---
 
-## Task 0: Verify live environment (MANUAL — do first, may adjust later tasks)
+## Task 0: Local environment & live verification (MANUAL — do first)
 
-These are read-only checks against the real OpenSearch cluster and Zalo OA. They confirm assumptions baked into the code below. If a result differs, update the noted task before coding it.
+Stand up a local OpenSearch in Docker to develop/test against, expose the local web server to Zalo OA over an HTTPS tunnel, and confirm the assumptions baked into the code below. If a verification result differs, update the noted task before coding it.
 
-- [ ] **Step 1: Inspect one Open WebUI index mapping**
+**Local test flow:**
+```
+Zalo OA
+  → HTTPS public URL (ngrok / cloudflared)
+  → localhost:3000
+  → POST /webhook/zalo
+  → verify signature → log body → enqueue → worker handles event
+```
 
-Run (replace `<id>` with a real uuid from the cluster):
+### Part A — Local OpenSearch (Docker)
+
+- [ ] **Step 1: Start single-node OpenSearch with kNN enabled**
+
+Run:
+```bash
+docker run -d --name os-dev -p 9200:9200 \
+  -e discovery.type=single-node \
+  -e plugins.security.disabled=true \
+  -e OPENSEARCH_INITIAL_ADMIN_PASSWORD=Dev_passw0rd! \
+  opensearchproject/opensearch:2.13.0
+```
+Then verify (wait ~20s for boot):
+```bash
+curl -s http://localhost:9200 | python -m json.tool
+```
+Expected: cluster info JSON. Use `OPENSEARCH_URL=http://localhost:9200`, leave `OPENSEARCH_USER`/`OPENSEARCH_PASSWORD` blank (security disabled in dev).
+
+- [ ] **Step 2: Create the hybrid search pipeline (score normalization)**
+
+Run:
+```bash
+curl -s -X PUT http://localhost:9200/_search/pipeline/hybrid-pipeline \
+  -H 'Content-Type: application/json' -d '{
+  "phase_results_processors": [
+    { "normalization-processor": {
+        "normalization": { "technique": "min_max" },
+        "combination": { "technique": "arithmetic_mean", "parameters": { "weights": [0.4, 0.6] } }
+    }}
+  ]
+}'
+```
+Expected: `{"acknowledged":true}`. Set `OPENSEARCH_SEARCH_PIPELINE=hybrid-pipeline`.
+
+- [ ] **Step 3: Create a sample index mirroring the Open WebUI layout + seed a doc**
+
+`dimension` MUST equal your embedding model's size from Step 7 (example uses 1024 — adjust).
+```bash
+curl -s -X PUT http://localhost:9200/open_webui_file-sample \
+  -H 'Content-Type: application/json' -d '{
+  "settings": { "index.knn": true },
+  "mappings": { "properties": {
+    "text":     { "type": "text" },
+    "vector":   { "type": "knn_vector", "dimension": 1024 },
+    "metadata": { "type": "object" }
+  }}
+}'
+```
+Seed one doc (use a real embedding of the text, or zeros for a shape-only test):
+```bash
+curl -s -X POST http://localhost:9200/open_webui_file-sample/_doc \
+  -H 'Content-Type: application/json' -d '{
+  "text": "UrBox là nền tảng quà tặng điện tử.",
+  "vector": [/* 1024 floats */],
+  "metadata": {}
+}'
+```
+Expected: doc indexed. `open_webui_file-*` now resolves locally for end-to-end testing.
+
+### Part B — HTTPS tunnel to Zalo OA
+
+- [ ] **Step 4: Expose the local web server (:3000) over HTTPS**
+
+ngrok:
+```bash
+ngrok http 3000
+```
+or cloudflared:
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+Copy the public HTTPS URL it prints.
+
+- [ ] **Step 5: Register the webhook in the Zalo OA dashboard**
+
+Set the webhook URL to `https://<public-url>/webhook/zalo` and subscribe to the `user_send_text` event. Keep the tunnel process running for the whole test session (the URL changes each restart on the free tier).
+
+### Part C — Verify assumptions against the REAL cluster (the one holding Open WebUI data)
+
+- [ ] **Step 6: Inspect a real Open WebUI index mapping**
+
 ```bash
 curl -s "$OPENSEARCH_URL/open_webui_file-<id>/_mapping" | python -m json.tool
 ```
-Expected: a `properties` block. **Record** the exact field names for: the BM25 text field (assumed `text`), the knn vector field (assumed `vector`), and its `dimension`. If names differ, update `OPENSEARCH_TEXT_FIELD` / `OPENSEARCH_VECTOR_FIELD` defaults in Task 2 and the query in Task 10.
+**Record** the BM25 text field (assumed `text`), the knn vector field (assumed `vector`), and its `dimension`. If names differ, update `OPENSEARCH_TEXT_FIELD` / `OPENSEARCH_VECTOR_FIELD` defaults in Task 2 and the query in Task 9.
 
-- [ ] **Step 2: Confirm search pipeline**
+- [ ] **Step 7: Confirm embedding model + dimension on the gateway**
 
-Run:
+```bash
+curl -s "$LLM_GATEWAY_BASE_URL/embeddings" \
+  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<embedding-model>","input":"ping"}' \
+  | python -c "import sys,json;print(len(json.load(sys.stdin)['data'][0]['embedding']))"
+```
+Expected: an integer equal to the index vector `dimension` from Step 6 (and used in Step 3). They MUST match.
+
+- [ ] **Step 8: Confirm the real cluster's search pipeline**
+
 ```bash
 curl -s "$OPENSEARCH_URL/_search/pipeline" | python -m json.tool
 ```
-Expected: a normalization-processor pipeline. **Record** its name → becomes `OPENSEARCH_SEARCH_PIPELINE`. If none exists, the hybrid query in Task 10 still runs but scores are not normalized; note to create one or accept raw scores.
+**Record** the production pipeline name → `OPENSEARCH_SEARCH_PIPELINE` for the real environment. If none exists, the hybrid query still runs but scores are not normalized.
 
-- [ ] **Step 3: Confirm embedding model + dimension on the gateway**
-
-Run:
-```bash
-curl -s "$LLM_GATEWAY_BASE_URL/v1/embeddings" \
-  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"<embedding-model>","input":"ping"}' | python -c "import sys,json;d=json.load(sys.stdin);print(len(d['data'][0]['embedding']))"
-```
-Expected: an integer equal to the index vector `dimension` from Step 1. They MUST match.
-
-- [ ] **Step 4: Record Zalo signature formula**
+- [ ] **Step 9: Record the Zalo signature formula**
 
 Confirm against current Zalo OA docs the exact MAC formula and header. This plan implements `mac = SHA256(appId + rawBody + timeStamp + OASecretKey)` with header `X-ZEvent-Signature: mac=<hex>` (Task 4). If the current API differs, adjust Task 4 only.
 
-No commit (read-only investigation).
+No commit (setup + read-only investigation).
 
 ---
 
@@ -1616,7 +1702,7 @@ async def test_webhook_rejects_bad_signature():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post(
-            "/webhook", content=b'{"event_name":"user_send_text"}',
+            "/webhook/zalo", content=b'{"event_name":"user_send_text"}',
             headers={"X-ZEvent-Signature": "mac=bad", "X-ZEvent-Timestamp": "1"},
         )
     assert r.status_code == 401
@@ -1642,7 +1728,7 @@ async def test_webhook_enqueues_text_event(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post(
-            "/webhook", content=body,
+            "/webhook/zalo", content=body,
             headers={"X-ZEvent-Signature": f"mac={mac}", "X-ZEvent-Timestamp": "1"},
         )
     assert r.status_code == 200
@@ -1701,7 +1787,7 @@ def create_app() -> FastAPI:
     async def health() -> dict:
         return {"status": "ok"}
 
-    @app.post("/webhook")
+    @app.post("/webhook/zalo")
     async def webhook(request: Request) -> Response:
         raw = await request.body()
         mac_header = request.headers.get("X-ZEvent-Signature", "")
@@ -1832,7 +1918,7 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --upgrade pip && pip install -e .
 # Default command runs the web server; compose overrides for the worker.
-CMD ["uvicorn", "zalo_bot.entrypoints.web:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "zalo_bot.entrypoints.web:app", "--host", "0.0.0.0", "--port", "3000"]
 ```
 
 - [ ] **Step 2: Write `.dockerignore`**
@@ -1855,6 +1941,14 @@ services:
     image: redis:7-alpine
     ports: ["6379:6379"]
 
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: Dev_passw0rd!
+    ports: ["9200:9200"]
+
   web:
     build:
       context: ..
@@ -1862,8 +1956,9 @@ services:
     env_file: ../.env
     environment:
       REDIS_URL: redis://redis:6379/0
-    ports: ["8000:8000"]
-    depends_on: [redis]
+      OPENSEARCH_URL: http://opensearch:9200
+    ports: ["3000:3000"]
+    depends_on: [redis, opensearch]
 
   worker:
     build:
@@ -1872,9 +1967,12 @@ services:
     env_file: ../.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      OPENSEARCH_URL: http://opensearch:9200
     command: ["arq", "zalo_bot.entrypoints.worker.WorkerSettings"]
-    depends_on: [redis]
+    depends_on: [redis, opensearch]
 ```
+
+> Note: when running via this compose, recreate the search pipeline (Task 0 Step 2) and seed index (Step 3) against `http://localhost:9200` after `opensearch` is healthy, since the container starts empty.
 
 - [ ] **Step 4: Verify the image builds**
 
@@ -1900,9 +1998,9 @@ git commit -m "chore(docker): image and compose for web + worker + redis"
 - [ ] **Step 2: Start the stack**
 
 Run: `docker compose -f docker/docker-compose.yml up`
-Expected: web on :8000, worker connected to redis, no startup errors.
+Expected: web on :3000, worker connected to redis, opensearch healthy, no startup errors. Then re-apply Task 0 Step 2 (pipeline) + Step 3 (seed index) against `http://localhost:9200`.
 
-- [ ] **Step 3: Point Zalo OA webhook** to the public URL of `/webhook` (via tunnel/ingress) and send a real question from a Zalo user.
+- [ ] **Step 3: Send a real question** from a Zalo user through the webhook registered in Task 0 (`https://<public-url>/webhook/zalo`, tunnel pointing at :3000).
 Expected: user receives a context-grounded answer; logs show one `enqueued` (web) and one `answered` (worker) with the same `correlation_id`.
 
 - [ ] **Step 4: Negative check** — send a non-text message (image/sticker).
