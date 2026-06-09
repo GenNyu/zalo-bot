@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     external_call_timeout_seconds: int = 30
     log_level: str = "INFO"
     log_question_text: bool = False
+    zalo_verifier_path: str = ""
+    zalo_verifier_content: str = ""
 
 
 @lru_cache

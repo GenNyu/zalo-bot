@@ -29,6 +29,13 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
     app = FastAPI(title="zalo-oa-rag")
 
+    if settings.zalo_verifier_path and settings.zalo_verifier_content:
+        verifier_path = "/" + settings.zalo_verifier_path.lstrip("/")
+
+        @app.get(verifier_path)
+        async def zalo_verifier() -> Response:
+            return Response(content=settings.zalo_verifier_content, media_type="text/html")
+
     @app.on_event("startup")
     async def _startup() -> None:
         await _init_pool()
